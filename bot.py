@@ -92,7 +92,7 @@ def init_database():
             conn.commit()
     print("✅ دیتابیس با موفقیت ابتدایی‌سازی شد.")
 
-# ====================== ایجاد خودکار ریپو گیت‌هاب ======================
+# ====================== ایجاد خودکار ریپو گیت‌هاب (نسخه اصلی و بهبود یافته) ======================
 def ensure_github_repo():
     if not GITHUB_TOKEN:
         print("⚠️ GITHUB_TOKEN تنظیم نشده است.")
@@ -103,34 +103,60 @@ def ensure_github_repo():
         "Accept": "application/vnd.github.v3+json"
     }
 
+    # Check if repo exists
     check = requests.get(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}", headers=headers)
     if check.status_code == 404:
         print(f"🔨 در حال ساخت ریپوی {GITHUB_REPO} ...")
+        # Create repo
         create = requests.post(f"{GITHUB_API}/user/repos", json={
             "name": GITHUB_REPO,
             "private": False,
             "description": "Bale Telegram Bot - File Uploads"
         }, headers=headers)
-        if create.status_code in [201, 200]:
-            print(f"✅ ریپوی {GITHUB_REPO} ساخته شد. در حال مقداردهی اولیه...")
-            time.sleep(2)
-            init_content = "# BaleTelobot Uploads\n\nThis repository is used by BaleTelobot for secure file uploads."
-            init_b64 = base64.b64encode(init_content.encode()).decode()
-
-            blob = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/blobs", json={"content": init_b64, "encoding": "base64"}, headers=headers)
-            blob_sha = blob.json()["sha"]
-
-            tree = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/trees", json={"tree": [{"path": "README.md", "mode": "100644", "type": "blob", "sha": blob_sha}]}, headers=headers)
-            tree_sha = tree.json()["sha"]
-
-            commit = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/commits", json={"message": "Initial commit", "tree": tree_sha}, headers=headers)
-            commit_sha = commit.json()["sha"]
-
-            requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs", json={"ref": "refs/heads/main", "sha": commit_sha}, headers=headers)
-
-            print(f"✅ ریپوی {GITHUB_REPO} آماده استفاده است!")
-        else:
+        if create.status_code not in [201, 200]:
             print(f"❌ خطا در ساخت ریپو: {create.text}")
+            return
+
+        print("✅ ریپو ساخته شد. در حال ایجاد کامیت اولیه...")
+        time.sleep(3)  # Wait for GitHub to process
+
+        # Create initial README commit
+        init_content = "# BaleTelobot Uploads\n\nThis repository is used by BaleTelobot for secure file uploads."
+        init_b64 = base64.b64encode(init_content.encode()).decode()
+
+        # Create blob for README
+        blob_resp = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/blobs", 
+            json={"content": init_b64, "encoding": "base64"}, headers=headers)
+        if blob_resp.status_code != 201:
+            print(f"❌ خطا در ساخت blob: {blob_resp.text}")
+            return
+        blob_sha = blob_resp.json()["sha"]
+
+        # Create tree
+        tree_resp = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/trees", 
+            json={"tree": [{"path": "README.md", "mode": "100644", "type": "blob", "sha": blob_sha}]}, headers=headers)
+        if tree_resp.status_code != 201:
+            print(f"❌ خطا در ساخت tree: {tree_resp.text}")
+            return
+        tree_sha = tree_resp.json()["sha"]
+
+        # Create commit
+        commit_resp = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/commits", 
+            json={"message": "Initial commit by BaleTelobot", "tree": tree_sha}, headers=headers)
+        if commit_resp.status_code != 201:
+            print(f"❌ خطا در ساخت commit: {commit_resp.text}")
+            return
+        commit_sha = commit_resp.json()["sha"]
+
+        # Create main branch
+        ref_resp = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs", 
+            json={"ref": "refs/heads/main", "sha": commit_sha}, headers=headers)
+        if ref_resp.status_code not in [200, 201]:
+            print(f"❌ خطا در ایجاد برنچ: {ref_resp.text}")
+            return
+
+        print(f"✅ ریپوی {GITHUB_REPO} آماده استفاده است!")
+
     elif check.status_code == 200:
         print(f"✅ ریپوی {GITHUB_REPO} وجود دارد.")
     else:
@@ -378,7 +404,7 @@ async def download_handler(client: Client, message: Message):
                 await upload_to_github_codeload(destination, file_name, status, client, message.chat.id, tg_id)
 
     except Exception as e:
-        await status_msg.edit_text(f"❌ خطا: {str(e)}")
+        await status.edit_text(f"❌ خطا: {str(e)}")
 
 # ====================== پیصرفت دانلود ======================
 async def progress_callback(current, total, status_msg, file_name, file_size):
