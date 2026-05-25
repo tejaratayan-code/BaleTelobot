@@ -409,14 +409,15 @@ async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg:
         original_dir = os.getcwd()
         os.chdir(LOCAL_REPO_PATH)
 
-        # Create new branch
+        # Reset and create new branch from latest main
+        subprocess.run(["git", "fetch", "origin"], capture_output=True)
+        subprocess.run(["git", "checkout", "main"], capture_output=True)
+        subprocess.run(["git", "pull", "origin", "main"], capture_output=True)
         subprocess.run(["git", "checkout", "-b", branch_name], capture_output=True)
 
-        # Add and commit
-        add_result = subprocess.run(["git", "add", str(zip_path.name)], capture_output=True, text=True)
-        commit_result = subprocess.run(["git", "commit", "-m", f"Upload {file_name}"], capture_output=True, text=True)
-
-        # Push
+        # Add, commit and push
+        subprocess.run(["git", "add", str(zip_path.name)], capture_output=True)
+        subprocess.run(["git", "commit", "-m", f"Upload {file_name}"], capture_output=True)
         push_result = subprocess.run(["git", "push", "-u", "origin", branch_name], capture_output=True, text=True)
 
         os.chdir(original_dir)
