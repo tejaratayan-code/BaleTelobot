@@ -136,31 +136,28 @@ def bale_polling():
             time.sleep(5)
 
 # ====================== منوی اصلی ======================
-@app.on_message(filters.command("start"))
-async def start_handler(client: Client, message: Message):
-    tg_id = message.from_user.id
+async def get_user_status(tg_id):
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM connections WHERE telegram_id=%s", (tg_id,))
-            row = cur.fetchone()
+            return cur.fetchone()
 
+async def build_main_menu_text(row):
     if not row:
         status = "❌ متصل نیست"
         daily_mb = 0
         total_mb = 0
-        files = 0
     else:
-        status = "✅ متصل" if row["connected"] else "❌ متصل نیست"
-        daily_mb = (row["daily_uploaded"] or 0) / (1024 * 1024)
-        total_mb = (row["total_uploaded"] or 0) / (1024 * 1024)
-        files = row["file_count"] or 0
+        status = "✅ متصل" if row.get("connected") else "❌ متصل نیست"
+        daily_mb = (row.get("daily_uploaded") or 0) / (1024 * 1024)
+        total_mb = (row.get("total_uploaded") or 0) / (1024 * 1024)
 
     remaining_mb = max(0, 1024 - daily_mb)
     percent = min(100, int((daily_mb / 1024) * 100))
     filled = int(percent / 10)
     bar = "█" * filled + "░" * (10 - filled)
 
-    text = (
+    return (
         f"━━━ 🤖 👋 منوی اصلی ━━━\n\n"
         f"📤 فایل یا لینک خود را ارسال کنید.\n"
         f"🔒 فایل‌ها با رمز یکبار مصرف قوی رمزگذاری می‌شوند.\n\n"
@@ -175,8 +172,14 @@ async def start_handler(client: Client, message: Message):
         f"👇 فایل خود را ارسال کنید:"
     )
 
+@app.on_message(filters.command("start"))
+async def start_handler(client: Client, message: Message):
+    tg_id = message.from_user.id
+    row = await get_user_status(tg_id)
+    text = await build_main_menu_text(row)
+
     buttons = []
-    if row and row["connected"]:
+    if row and row.get("connected"):
         buttons.append([InlineKeyboardButton("🔌 قطع اتصال به بله", callback_data="disconnect")])
     else:
         buttons.append([InlineKeyboardButton("🔗 اتصال به بله", callback_data="connect")])
@@ -204,8 +207,11 @@ async def callback_handler(client, callback_query):
             with conn.cursor() as cur:
                 cur.execute("UPDATE connections SET connected=FALSE WHERE telegram_id=%s", (tg_id,))
                 conn.commit()
-        await msg.edit_text("✅ اتصال به بله قطع شد.")
-        await start_handler(client, msg)
+        row = await get_user_status(tg_id)
+        text = await build_main_menu_text(row)
+        await msg.edit_text(text, reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔗 اتصال به بله", callback_data="connect")]
+        ]))
 
     elif data == "admin_panel" and tg_id == ADMIN_ID:
         await show_admin_panel(client, callback_query)
@@ -217,12 +223,20 @@ async def callback_handler(client, callback_query):
         await msg.edit_text(f"⚠️ **هشدار خطرناک!**\n\nریست کامل دیتابیس باعث حذف تمام اطلاعات می‌شود.\n\nبرای تأیید جواب این سوال را بنویس:\n\n`{a} + {b} = ?`")
 
     elif data == "back_to_start":
-        await start_handler(client, msg)
+        row = await get_user_status(tg_id)
+        text = await build_main_menu_text(row)
+        buttons = []
+        if row and row.get("connected"):
+            buttons.append([InlineKeyboardButton("🔌 قطع اتصال به بله", callback_data="disconnect")])
+        else:
+            buttons.append([InlineKeyboardButton("🔗 اتصال به بله", callback_data="connect")])
+        if tg_id == ADMIN_ID:
+            buttons.append([InlineKeyboardButton("⚙️ پنل مدیریت", callback_data="admin_panel")])
+        await msg.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
     elif data.startswith("cancel:"):
-        # دکمه کنسل
         try:
-            await msg.edit_text("❌ آپلود کنسل شد.")
+            await msg.edit_text("❌ آپلود کنسل شد.\nفایل جزئی حذف شد.")
         except:
             pass
 
@@ -257,7 +271,6 @@ async def download_handler(client: Client, message: Message):
 
     await message.reply_text("📥 فایل دریافت شد، در حال پردازش...")
 
-    # ====================== بخش اصلاح شده برای عکس ======================
     if message.photo:
         if isinstance(message.photo, list):
             file_attr = message.photo[-1]
@@ -321,7 +334,7 @@ async def download_handler(client: Client, message: Message):
     except Exception as e:
         await status.edit_text(f"❌ خطا: {str(e)}")
 
-# ====================== پیشرفت دانلود ======================
+# ====================== پیصرفت دانلود ======================
 async def progress_callback(current, total, status_msg, file_name, file_size):
     if total == 0: return
     percent = (current / total) * 100
