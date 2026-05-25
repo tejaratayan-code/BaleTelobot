@@ -250,10 +250,20 @@ async def download_handler(client: Client, message: Message):
 
     await message.reply_text("📥 فایل دریافت شد، در حال پردازش...")
 
-    file_attr = message.document or message.video or message.audio or message.voice or (message.photo[-1] if message.photo else None)
-    if not file_attr: return
+    # ====================== بخش اصلاح شده برای عکس ======================
+    if message.photo:
+        if isinstance(message.photo, list):
+            file_attr = message.photo[-1]
+        else:
+            file_attr = message.photo
+    else:
+        file_attr = message.document or message.video or message.audio or message.voice
 
-    file_name = getattr(file_attr, "file_name", f"file_{message.id}.jpg" if message.photo else f"file_{message.id}")
+    if not file_attr: 
+        await message.reply_text("❌ فایل پشتیبانی نمی‌شود.")
+        return
+
+    file_name = getattr(file_attr, "file_name", f"file_{message.id}.jpg")
     destination = SAVE_PATH / file_name
 
     status = await message.reply_text(
@@ -304,7 +314,7 @@ async def download_handler(client: Client, message: Message):
     except Exception as e:
         await status.edit_text(f"❌ خطا: {str(e)}")
 
-# ====================== پیشرفت دانلود ======================
+# ====================== پیصرفت دانلود ======================
 async def progress_callback(current, total, status_msg, file_name, file_size):
     if total == 0: return
     percent = (current / total) * 100
