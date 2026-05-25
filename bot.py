@@ -219,6 +219,13 @@ async def callback_handler(client, callback_query):
     elif data == "back_to_start":
         await start_handler(client, msg)
 
+    elif data.startswith("cancel:"):
+        # دکمه کنسل
+        try:
+            await msg.edit_text("❌ آپلود کنسل شد.")
+        except:
+            pass
+
 # ====================== دانلود فایل ======================
 @app.on_message(
     (filters.document | filters.video | filters.audio | filters.voice | filters.photo) & filters.private
@@ -314,7 +321,7 @@ async def download_handler(client: Client, message: Message):
     except Exception as e:
         await status.edit_text(f"❌ خطا: {str(e)}")
 
-# ====================== پیصرفت دانلود ======================
+# ====================== پیشرفت دانلود ======================
 async def progress_callback(current, total, status_msg, file_name, file_size):
     if total == 0: return
     percent = (current / total) * 100
