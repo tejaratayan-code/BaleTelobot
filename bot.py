@@ -219,14 +219,6 @@ async def callback_handler(client, callback_query):
     elif data == "back_to_start":
         await start_handler(client, msg)
 
-# ====================== پنل مدیریت ======================
-async def show_admin_panel(client, callback_query):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🗑 ریست کامل دیتابیس", callback_data="reset_db")],
-        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_start")]
-    ])
-    await callback_query.message.edit_text("⚙️ **پنل مدیریت ادمین**", reply_markup=keyboard)
-
 # ====================== دانلود فایل ======================
 @app.on_message(
     (filters.document | filters.video | filters.audio | filters.voice | filters.photo) & filters.private
