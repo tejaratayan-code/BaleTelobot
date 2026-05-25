@@ -96,7 +96,7 @@ def init_database():
             conn.commit()
     print("✅ دیتابیس با موفقیت ابتدایی‌سازی شد.")
 
-# ====================== کلون ریپو محلی (برای آپلود بدون محدودیت حجم) ======================
+# ====================== کلون ریپو محلی ======================
 def setup_local_repo():
     if not GITHUB_TOKEN:
         print("⚠️ GITHUB_TOKEN تنظیم نشده است.")
@@ -118,8 +118,6 @@ def setup_local_repo():
         return False
 
 setup_local_repo()
-
-ensure_github_repo = lambda: None  # غیرفعال شد
 
 init_database()
 
@@ -406,17 +404,21 @@ async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg:
 
         await status_msg.edit_text("☁️ در حال آپلود به GitHub...")
 
-        # Copy to local repo
+        # Copy zip to local repo
         dest_file = LOCAL_REPO_PATH / zip_path.name
         import shutil
-        shutil.copy(zip_path, dest_file)
+        shutil.copy2(zip_path, dest_file)
 
         # Git operations
+        original_dir = os.getcwd()
         os.chdir(LOCAL_REPO_PATH)
+
         subprocess.run(["git", "checkout", "-b", branch_name], capture_output=True)
-        subprocess.run(["git", "add", zip_path.name], capture_output=True)
+        subprocess.run(["git", "add", str(zip_path.name)], capture_output=True)
         subprocess.run(["git", "commit", "-m", f"Upload {file_name}"], capture_output=True)
-        push_result = subprocess.run(["git", "push", "origin", branch_name], capture_output=True, text=True)
+        push_result = subprocess.run(["git", "push", "-u", "origin", branch_name], capture_output=True, text=True)
+
+        os.chdir(original_dir)
 
         if push_result.returncode != 0:
             raise Exception(f"Git push failed: {push_result.stderr}")
