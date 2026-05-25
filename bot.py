@@ -27,7 +27,7 @@ BALE_USER_ID = int(os.getenv("BALE_USER_ID", 0))
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 BASE_URL = os.getenv("BASE_URL", "https://tapi.bale.ai/bot")
 
-# ====================== پوشه Downloads (بدون وابستگی از .env) ======================
+# ====================== پوشه Downloads ======================
 BASE_DIR = Path(__file__).parent
 DOWNLOADS_PATH = BASE_DIR / "Downloads"
 DOWNLOADS_PATH.mkdir(exist_ok=True)
@@ -317,7 +317,7 @@ async def download_handler(client: Client, message: Message):
         return
 
     file_name = getattr(file_attr, "file_name", f"file_{message.id}.jpg")
-    destination = DOWNLOADS_PATH / file_name   # <--- تغییر کردم به Downloads
+    destination = DOWNLOADS_PATH / file_name
 
     status = await message.reply_text(
         f"🚀 در حال دانلود `{file_name}`...",
@@ -394,7 +394,7 @@ async def progress_callback(current, total, status_msg, file_name, file_size):
     except:
         pass
 
-# ====================== آپلود به GitHub ======================
+# ====================== آپلود به GitHub (Git Data API - مناسب برای فایل‌های بزرگ) ======================
 async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg: Message, client, chat_id, user_id):
     try:
         password = secrets.token_urlsafe(64)
@@ -415,28 +415,44 @@ async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg:
             "Accept": "application/vnd.github.v3+json"
         }
 
+        # Get repo info
+        repo_info = requests.get(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}", headers=headers).json()
+        default_branch = repo_info.get("default_branch", "main")
+
+        # Get base SHA
+        ref = requests.get(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/ref/heads/{default_branch}", headers=headers).json()
+        base_sha = ref["object"]["sha"]
+
+        # Create branch
+        requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs", json={"ref": f"refs/heads/{branch_name}", "sha": base_sha}, headers=headers)
+
+        # Read and encode file
         with open(zip_path, "rb") as f:
             content = f.read()
         content_b64 = base64.b64encode(content).decode()
 
-        put_url = f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/{zip_path.name}"
-        put_data = {
-            "message": f"Upload {file_name}",
-            "content": content_b64,
-            "branch": branch_name
-        }
+        # Create blob
+        blob_resp = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/blobs", json={"content": content_b64, "encoding": "base64"}, headers=headers)
+        if blob_resp.status_code != 201:
+            raise Exception(f"Failed to create blob: {blob_resp.text}")
+        blob_sha = blob_resp.json()["sha"]
 
-        repo_info = requests.get(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}", headers=headers).json()
-        default_branch = repo_info.get("default_branch", "main")
+        # Create tree
+        tree_data = {"base_tree": base_sha, "tree": [{"path": zip_path.name, "mode": "100644", "type": "blob", "sha": blob_sha}]}
+        tree_resp = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/trees", json=tree_data, headers=headers)
+        if tree_resp.status_code != 201:
+            raise Exception(f"Failed to create tree: {tree_resp.text}")
+        tree_sha = tree_resp.json()["sha"]
 
-        ref = requests.get(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/ref/heads/{default_branch}", headers=headers).json()
-        base_sha = ref["object"]["sha"]
+        # Create commit
+        commit_data = {"message": f"Upload {file_name}", "tree": tree_sha, "parents": [base_sha]}
+        commit_resp = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/commits", json=commit_data, headers=headers)
+        if commit_resp.status_code != 201:
+            raise Exception(f"Failed to create commit: {commit_resp.text}")
+        commit_sha = commit_resp.json()["sha"]
 
-        requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs", json={"ref": f"refs/heads/{branch_name}", "sha": base_sha}, headers=headers)
-
-        response = requests.put(put_url, json=put_data, headers=headers)
-        if response.status_code not in [200, 201]:
-            raise Exception(f"Failed to upload file: {response.text}")
+        # Update branch
+        requests.patch(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs/heads/{branch_name}", json={"sha": commit_sha}, headers=headers)
 
         download_link = f"https://codeload.github.com/{GITHUB_OWNER}/{GITHUB_REPO}/zip/refs/heads/{branch_name}"
 
