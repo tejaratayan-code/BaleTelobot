@@ -28,7 +28,6 @@ BALE_USER_ID = int(os.getenv("BALE_USER_ID", 0))
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 BASE_URL = os.getenv("BASE_URL", "https://tapi.bale.ai/bot")
 
-# ====================== پوشه Downloads ======================
 BASE_DIR = Path(__file__).parent
 DOWNLOADS_PATH = BASE_DIR / "Downloads"
 DOWNLOADS_PATH.mkdir(exist_ok=True)
@@ -36,7 +35,6 @@ DOWNLOADS_PATH.mkdir(exist_ok=True)
 DAILY_LIMIT = 1024 * 1024 * 1024
 DANGEROUS_EXT = {'.php', '.phtml', '.html', '.htm', '.js', '.exe', '.bat', '.sh', '.py', '.pl', '.cgi', '.jsp', '.asp'}
 
-# ====================== MySQL ======================
 DB_CONFIG = {
     "host": os.getenv("DB_HOST", "localhost"),
     "user": os.getenv("DB_USER", ""),
@@ -44,7 +42,6 @@ DB_CONFIG = {
     "database": os.getenv("DB_NAME", ""),
 }
 
-# ====================== GitHub ======================
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 GITHUB_OWNER = os.getenv("GITHUB_OWNER", "tejaratayan-code")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "BaleTelobot")
@@ -55,11 +52,12 @@ LOCAL_REPO_PATH = BASE_DIR / "local_repo"
 upload_lock = Lock()
 app = Client("large_file_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# ====================== تابع get_db ======================
+# Global cancel flag
+cancel_flags = {}
+
 def get_db():
     return pymysql.connect(**DB_CONFIG, cursorclass=pymysql.cursors.DictCursor)
 
-# ====================== ابتدایی‌سازی دیتابس ======================
 def init_database():
     with get_db() as conn:
         with conn.cursor() as cur:
@@ -96,7 +94,6 @@ def init_database():
             conn.commit()
     print("✅ دیتابیس با موفقیت ابتدایی‌سازی شد.")
 
-# ====================== کلون ریپو محلی ======================
 def setup_local_repo():
     if not GITHUB_TOKEN:
         print("⚠️ GITHUB_TOKEN تنظیم نشده است.")
@@ -121,7 +118,6 @@ setup_local_repo()
 
 init_database()
 
-# ====================== تابع get_expiration_minutes ======================
 def get_expiration_minutes(size_mb: float) -> int:
     if size_mb < 100:   return 10
     elif size_mb < 300: return 20
@@ -129,7 +125,6 @@ def get_expiration_minutes(size_mb: float) -> int:
     elif size_mb < 700: return 40
     else:               return int(size_mb / 1000) * 60 + 60
 
-# ====================== Polling بله ======================
 def bale_polling():
     offset = 0
     while True:
@@ -162,7 +157,6 @@ def bale_polling():
         except:
             time.sleep(5)
 
-# ====================== منوی اصلی ======================
 async def get_user_status(tg_id):
     with get_db() as conn:
         with conn.cursor() as cur:
@@ -180,9 +174,6 @@ async def build_main_menu_text(row):
         total_mb = (row.get("total_uploaded") or 0) / (1024 * 1024)
 
     remaining_mb = max(0, 1024 - daily_mb)
-    percent = min(100, int((daily_mb / 1024) * 100))
-    filled = int(percent / 10)
-    bar = "█" * filled + "░" * (10 - filled)
 
     return (
         f"━━━ 🤖 👋 منوی اصلی ━━━\n\n"
@@ -191,9 +182,8 @@ async def build_main_menu_text(row):
         f"━━━━━━━ 📊 وضعیت حساب ━━━━━━━\n"
         f"🏷 پلن: رایگان\n"
         f"محدودیت روزانه : 1024 MB\n"
+        f"مصرفی: {daily_mb:.1f} MB | باقی: {remaining_mb:.2f} MB\n"
         f"وضعیت اتصال به بله : {status}\n"
-        f"📅 مصرف امروز: [{bar}] {percent}%\n"
-        f"   {daily_mb:.1f} MB از 1024 MB — باقی: {remaining_mb:.2f} MB\n"
         f"⏳ اعتبار لینک: 1 ساعت (1GB=1 H)\n\n"
         f"📜 قوانین: محتوای غیرقانونی ممنوع | مسئولیت فایل‌ها با کاربر است.\n\n"
         f"👇 فایل خود را ارسال کنید:"
@@ -217,7 +207,6 @@ async def start_handler(client: Client, message: Message):
     keyboard = InlineKeyboardMarkup(buttons)
     await message.reply_text(text, reply_markup=keyboard)
 
-# ====================== Callback Query ======================
 @app.on_callback_query()
 async def callback_handler(client, callback_query):
     data = callback_query.data
@@ -262,6 +251,8 @@ async def callback_handler(client, callback_query):
         await msg.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
 
     elif data.startswith("cancel:"):
+        cancel_id = data.split(":")[1]
+        cancel_flags[cancel_id] = True
         try:
             await msg.edit_text("❌ آپلود کنسل شد.\nفایل جزئی حذف شد.")
         except:
@@ -273,6 +264,8 @@ async def callback_handler(client, callback_query):
 )
 async def download_handler(client: Client, message: Message):
     tg_id = message.from_user.id
+    cancel_id = str(message.id)
+    cancel_flags[cancel_id] = False
 
     file_name = getattr(message.document, "file_name", "") if message.document else ""
     ext = os.path.splitext(file_name)[1].lower()
@@ -315,7 +308,7 @@ async def download_handler(client: Client, message: Message):
 
     status = await message.reply_text(
         f"🚀 در حال دانلود `{file_name}`...",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ کنسل", callback_data=f"cancel:{message.id}")]])
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ کنسل", callback_data=f"cancel:{cancel_id}")]])
     )
 
     status.start_time = time.time()
@@ -329,6 +322,10 @@ async def download_handler(client: Client, message: Message):
             progress=progress_callback,
             progress_args=(status, file_name, getattr(file_attr, "file_size", 0))
         )
+
+        if cancel_flags.get(cancel_id, False):
+            if destination.exists(): os.remove(destination)
+            return
 
         file_size = destination.stat().st_size
         file_size_mb = file_size / (1024 * 1024)
@@ -356,12 +353,11 @@ async def download_handler(client: Client, message: Message):
             if file_size_mb <= 20 and bale_id:
                 await upload_direct_to_bale(destination, file_name, status, client, message.chat.id, bale_id)
             else:
-                await upload_to_github_codeload(destination, file_name, status, client, message.chat.id, tg_id)
+                await upload_to_github_codeload(destination, file_name, status, client, message.chat.id, tg_id, cancel_id)
 
     except Exception as e:
         await status.edit_text(f"❌ خطا: {str(e)}")
 
-# ====================== پیصرفت دانلود ======================
 async def progress_callback(current, total, status_msg, file_name, file_size):
     if total == 0: return
     percent = (current / total) * 100
@@ -388,8 +384,7 @@ async def progress_callback(current, total, status_msg, file_name, file_size):
     except:
         pass
 
-# ====================== آپلود به GitHub (Git Push - بدون محدودیت حجم) ======================
-async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg: Message, client, chat_id, user_id):
+async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg: Message, client, chat_id, user_id, cancel_id):
     try:
         password = secrets.token_urlsafe(64)
         zip_path = file_path.with_suffix(".7z")
@@ -397,19 +392,22 @@ async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg:
         branch_name = f"user_{user_id}_{random_num}"
 
         file_size_mb = file_path.stat().st_size / (1024 * 1024)
-        await status_msg.edit_text(f"🗜 در حال فشرده‌سازی فایل ({file_size_mb:.1f} MB)...\nلطفاً صبر کنید...")
+        await status_msg.edit_text(f"🗜 در حال فشرده‌سازی فایل ({file_size_mb:.1f} MB)...\nلطفاً صبر کنید...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ کنسل", callback_data=f"cancel:{cancel_id}")]]))
 
         with py7zr.SevenZipFile(zip_path, mode='w', password=password) as z:
             z.write(file_path, arcname=file_path.name)
 
-        await status_msg.edit_text("☁️ در حال آپلود به GitHub...")
+        if cancel_flags.get(cancel_id, False):
+            if file_path.exists(): os.remove(file_path)
+            if zip_path.exists(): os.remove(zip_path)
+            return
 
-        # Copy zip to local repo
+        await status_msg.edit_text("☁️ در حال آپلود به GitHub...", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ کنسل", callback_data=f"cancel:{cancel_id}")]]))
+
         dest_file = LOCAL_REPO_PATH / zip_path.name
         import shutil
         shutil.copy2(zip_path, dest_file)
 
-        # Git operations
         original_dir = os.getcwd()
         os.chdir(LOCAL_REPO_PATH)
 
@@ -422,6 +420,9 @@ async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg:
 
         if push_result.returncode != 0:
             raise Exception(f"Git push failed: {push_result.stderr}")
+
+        if cancel_flags.get(cancel_id, False):
+            return
 
         download_link = f"https://codeload.github.com/{GITHUB_OWNER}/{GITHUB_REPO}/zip/refs/heads/{branch_name}"
 
@@ -480,7 +481,6 @@ async def delete_branch_after_delay(branch_name: str, delay_seconds: int, client
     except:
         pass
 
-# ====================== شروع ربات ======================
 print("✅ ربات کامل و نهایی در حال اجرا...")
 threading.Thread(target=bale_polling, daemon=True).start()
 app.run()
