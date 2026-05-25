@@ -52,7 +52,6 @@ LOCAL_REPO_PATH = BASE_DIR / "local_repo"
 upload_lock = Lock()
 app = Client("large_file_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# Global cancel flag
 cancel_flags = {}
 
 def get_db():
@@ -258,7 +257,6 @@ async def callback_handler(client, callback_query):
         except:
             pass
 
-# ====================== دانلود فایل ======================
 @app.on_message(
     (filters.document | filters.video | filters.audio | filters.voice | filters.photo) & filters.private
 )
@@ -411,14 +409,20 @@ async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg:
         original_dir = os.getcwd()
         os.chdir(LOCAL_REPO_PATH)
 
+        # Create new branch
         subprocess.run(["git", "checkout", "-b", branch_name], capture_output=True)
-        subprocess.run(["git", "add", str(zip_path.name)], capture_output=True)
-        subprocess.run(["git", "commit", "-m", f"Upload {file_name}"], capture_output=True)
+
+        # Add and commit
+        add_result = subprocess.run(["git", "add", str(zip_path.name)], capture_output=True, text=True)
+        commit_result = subprocess.run(["git", "commit", "-m", f"Upload {file_name}"], capture_output=True, text=True)
+
+        # Push
         push_result = subprocess.run(["git", "push", "-u", "origin", branch_name], capture_output=True, text=True)
 
         os.chdir(original_dir)
 
         if push_result.returncode != 0:
+            print(f"Git push error: {push_result.stderr}")
             raise Exception(f"Git push failed: {push_result.stderr}")
 
         if cancel_flags.get(cancel_id, False):
