@@ -92,7 +92,7 @@ def init_database():
             conn.commit()
     print("✅ دیتابیس با موفقیت ابتدایی‌سازی شد.")
 
-# ====================== ایجاد خودکار ریپو گیت‌هاب (نسخه اصلی و بهبود یافته) ======================
+# ====================== ایجاد خودکار ریپو گیت‌هاب ======================
 def ensure_github_repo():
     if not GITHUB_TOKEN:
         print("⚠️ GITHUB_TOKEN تنظیم نشده است.")
@@ -103,11 +103,9 @@ def ensure_github_repo():
         "Accept": "application/vnd.github.v3+json"
     }
 
-    # Check if repo exists
     check = requests.get(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}", headers=headers)
     if check.status_code == 404:
         print(f"🔨 در حال ساخت ریپوی {GITHUB_REPO} ...")
-        # Create repo
         create = requests.post(f"{GITHUB_API}/user/repos", json={
             "name": GITHUB_REPO,
             "private": False,
@@ -116,47 +114,7 @@ def ensure_github_repo():
         if create.status_code not in [201, 200]:
             print(f"❌ خطا در ساخت ریپو: {create.text}")
             return
-
-        print("✅ ریپو ساخته شد. در حال ایجاد کامیت اولیه...")
-        time.sleep(3)  # Wait for GitHub to process
-
-        # Create initial README commit
-        init_content = "# BaleTelobot Uploads\n\nThis repository is used by BaleTelobot for secure file uploads."
-        init_b64 = base64.b64encode(init_content.encode()).decode()
-
-        # Create blob for README
-        blob_resp = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/blobs", 
-            json={"content": init_b64, "encoding": "base64"}, headers=headers)
-        if blob_resp.status_code != 201:
-            print(f"❌ خطا در ساخت blob: {blob_resp.text}")
-            return
-        blob_sha = blob_resp.json()["sha"]
-
-        # Create tree
-        tree_resp = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/trees", 
-            json={"tree": [{"path": "README.md", "mode": "100644", "type": "blob", "sha": blob_sha}]}, headers=headers)
-        if tree_resp.status_code != 201:
-            print(f"❌ خطا در ساخت tree: {tree_resp.text}")
-            return
-        tree_sha = tree_resp.json()["sha"]
-
-        # Create commit
-        commit_resp = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/commits", 
-            json={"message": "Initial commit by BaleTelobot", "tree": tree_sha}, headers=headers)
-        if commit_resp.status_code != 201:
-            print(f"❌ خطا در ساخت commit: {commit_resp.text}")
-            return
-        commit_sha = commit_resp.json()["sha"]
-
-        # Create main branch
-        ref_resp = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs", 
-            json={"ref": "refs/heads/main", "sha": commit_sha}, headers=headers)
-        if ref_resp.status_code not in [200, 201]:
-            print(f"❌ خطا در ایجاد برنچ: {ref_resp.text}")
-            return
-
-        print(f"✅ ریپوی {GITHUB_REPO} آماده استفاده است!")
-
+        print(f"✅ ریپوی {GITHUB_REPO} ساخته شد!")
     elif check.status_code == 200:
         print(f"✅ ریپوی {GITHUB_REPO} وجود دارد.")
     else:
@@ -433,7 +391,7 @@ async def progress_callback(current, total, status_msg, file_name, file_size):
     except:
         pass
 
-# ====================== آپلود به GitHub ======================
+# ====================== آپلود به GitHub (نسخه ساده و قابل اطمینان) ======================
 async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg: Message, client, chat_id, user_id):
     try:
         password = secrets.token_urlsafe(64)
@@ -454,48 +412,31 @@ async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg:
             "Accept": "application/vnd.github.v3+json"
         }
 
-        repo_resp = requests.get(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}", headers=headers)
-        if repo_resp.status_code != 200:
-            raise Exception(f"Repo not found or no access: {repo_resp.text}")
-        repo_info = repo_resp.json()
-        default_branch = repo_info.get("default_branch", "main")
-
-        ref_resp = requests.get(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/ref/heads/{default_branch}", headers=headers)
-        if ref_resp.status_code != 200:
-            raise Exception(f"Failed to get ref: {ref_resp.text}")
-        base_sha = ref_resp.json()["object"]["sha"]
-
-        create_branch = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs", 
-            json={"ref": f"refs/heads/{branch_name}", "sha": base_sha}, headers=headers)
-        if create_branch.status_code not in [200, 201]:
-            raise Exception(f"Failed to create branch: {create_branch.text}")
-
+        # Use Contents API (simpler and more reliable for large files)
         with open(zip_path, "rb") as f:
             content = f.read()
         content_b64 = base64.b64encode(content).decode()
 
-        blob_resp = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/blobs", 
-            json={"content": content_b64, "encoding": "base64"}, headers=headers)
-        if blob_resp.status_code != 201:
-            raise Exception(f"Failed to create blob: {blob_resp.text}")
-        blob_sha = blob_resp.json()["sha"]
+        put_url = f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/{zip_path.name}"
+        put_data = {
+            "message": f"Upload {file_name}",
+            "content": content_b64,
+            "branch": branch_name
+        }
 
-        tree_data = {"base_tree": base_sha, "tree": [{"path": zip_path.name, "mode": "100644", "type": "blob", "sha": blob_sha}]}
-        tree_resp = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/trees", json=tree_data, headers=headers)
-        if tree_resp.status_code != 201:
-            raise Exception(f"Failed to create tree: {tree_resp.text}")
-        tree_sha = tree_resp.json()["sha"]
+        # First create branch
+        repo_info = requests.get(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}", headers=headers).json()
+        default_branch = repo_info.get("default_branch", "main")
 
-        commit_data = {"message": f"Upload {file_name}", "tree": tree_sha, "parents": [base_sha]}
-        commit_resp = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/commits", json=commit_data, headers=headers)
-        if commit_resp.status_code != 201:
-            raise Exception(f"Failed to create commit: {commit_resp.text}")
-        commit_sha = commit_resp.json()["sha"]
+        ref = requests.get(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/ref/heads/{default_branch}", headers=headers).json()
+        base_sha = ref["object"]["sha"]
 
-        update_ref = requests.patch(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs/heads/{branch_name}", 
-            json={"sha": commit_sha}, headers=headers)
-        if update_ref.status_code != 200:
-            raise Exception(f"Failed to update ref: {update_ref.text}")
+        requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs", json={"ref": f"refs/heads/{branch_name}", "sha": base_sha}, headers=headers)
+
+        # Upload file
+        response = requests.put(put_url, json=put_data, headers=headers)
+        if response.status_code not in [200, 201]:
+            raise Exception(f"Failed to upload file: {response.text}")
 
         download_link = f"https://codeload.github.com/{GITHUB_OWNER}/{GITHUB_REPO}/zip/refs/heads/{branch_name}"
 
