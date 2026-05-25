@@ -9,8 +9,13 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 admin_captcha = {}
 
 async def show_admin_panel(client, callback_query):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🗑 ریست کامل دیتابیس", callback_data="reset_db")],
-        [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_start")]
-    ])
-    await callback_query.message.edit_text("⚙️ **پنل مدیریت ادمین**", reply_markup=keyboard)
+    try:
+        await callback_query.edit_message_text(
+            "⚙️ **پنل مدیریت ادمین**",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🗑 ریست کامل دیتابیس", callback_data="reset_db")],
+                [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_start")]
+            ])
+        )
+    except:
+        pass
