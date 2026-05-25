@@ -26,8 +26,11 @@ BALE_BOT_USERNAME = os.getenv("BALE_BOT_USERNAME", "")
 BALE_USER_ID = int(os.getenv("BALE_USER_ID", 0))
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 BASE_URL = os.getenv("BASE_URL", "https://tapi.bale.ai/bot")
-SAVE_PATH = Path(os.getenv("SAVE_PATH", "/home/ceqzpcjs/public_html/Downbale"))
-SAVE_PATH.mkdir(exist_ok=True)
+
+# ====================== پوشه Downloads (بدون وابستگی از .env) ======================
+BASE_DIR = Path(__file__).parent
+DOWNLOADS_PATH = BASE_DIR / "Downloads"
+DOWNLOADS_PATH.mkdir(exist_ok=True)
 
 DAILY_LIMIT = 1024 * 1024 * 1024
 DANGEROUS_EXT = {'.php', '.phtml', '.html', '.htm', '.js', '.exe', '.bat', '.sh', '.py', '.pl', '.cgi', '.jsp', '.asp'}
@@ -314,7 +317,7 @@ async def download_handler(client: Client, message: Message):
         return
 
     file_name = getattr(file_attr, "file_name", f"file_{message.id}.jpg")
-    destination = SAVE_PATH / file_name
+    destination = DOWNLOADS_PATH / file_name   # <--- تغییر کردم به Downloads
 
     status = await message.reply_text(
         f"🚀 در حال دانلود `{file_name}`...",
@@ -391,7 +394,7 @@ async def progress_callback(current, total, status_msg, file_name, file_size):
     except:
         pass
 
-# ====================== آپلود به GitHub (نسخه ساده و قابل اطمینان) ======================
+# ====================== آپلود به GitHub ======================
 async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg: Message, client, chat_id, user_id):
     try:
         password = secrets.token_urlsafe(64)
@@ -412,7 +415,6 @@ async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg:
             "Accept": "application/vnd.github.v3+json"
         }
 
-        # Use Contents API (simpler and more reliable for large files)
         with open(zip_path, "rb") as f:
             content = f.read()
         content_b64 = base64.b64encode(content).decode()
@@ -424,7 +426,6 @@ async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg:
             "branch": branch_name
         }
 
-        # First create branch
         repo_info = requests.get(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}", headers=headers).json()
         default_branch = repo_info.get("default_branch", "main")
 
@@ -433,7 +434,6 @@ async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg:
 
         requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs", json={"ref": f"refs/heads/{branch_name}", "sha": base_sha}, headers=headers)
 
-        # Upload file
         response = requests.put(put_url, json=put_data, headers=headers)
         if response.status_code not in [200, 201]:
             raise Exception(f"Failed to upload file: {response.text}")
