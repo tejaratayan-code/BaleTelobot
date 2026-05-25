@@ -14,6 +14,7 @@ import pymysql
 import threading
 from datetime import datetime, timedelta, date
 from dotenv import load_dotenv
+import subprocess
 
 load_dotenv()
 
@@ -49,7 +50,7 @@ GITHUB_OWNER = os.getenv("GITHUB_OWNER", "tejaratayan-code")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "BaleTelobot")
 GITHUB_API = "https://api.github.com"
 
-from adminpanel import admin_captcha, show_admin_panel
+LOCAL_REPO_PATH = BASE_DIR / "local_repo"
 
 upload_lock = Lock()
 app = Client("large_file_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -95,35 +96,30 @@ def init_database():
             conn.commit()
     print("✅ دیتابیس با موفقیت ابتدایی‌سازی شد.")
 
-# ====================== ایجاد خودکار ریپو گیت‌هاب ======================
-def ensure_github_repo():
+# ====================== کلون ریپو محلی (برای آپلود بدون محدودیت حجم) ======================
+def setup_local_repo():
     if not GITHUB_TOKEN:
         print("⚠️ GITHUB_TOKEN تنظیم نشده است.")
-        return
+        return False
 
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
-    }
+    if LOCAL_REPO_PATH.exists():
+        print("✅ ریپوی محلی وجود دارد.")
+        return True
 
-    check = requests.get(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}", headers=headers)
-    if check.status_code == 404:
-        print(f"🔨 در حال ساخت ریپوی {GITHUB_REPO} ...")
-        create = requests.post(f"{GITHUB_API}/user/repos", json={
-            "name": GITHUB_REPO,
-            "private": False,
-            "description": "Bale Telegram Bot - File Uploads"
-        }, headers=headers)
-        if create.status_code not in [201, 200]:
-            print(f"❌ خطا در ساخت ریپو: {create.text}")
-            return
-        print(f"✅ ریپوی {GITHUB_REPO} ساخته شد!")
-    elif check.status_code == 200:
-        print(f"✅ ریپوی {GITHUB_REPO} وجود دارد.")
+    print("🔨 در حال کلون ریپو به صورت محلی...")
+    clone_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_OWNER}/{GITHUB_REPO}.git"
+    result = subprocess.run(["git", "clone", clone_url, str(LOCAL_REPO_PATH)], capture_output=True, text=True)
+
+    if result.returncode == 0:
+        print("✅ ریپوی محلی با موفقیت کلون شد.")
+        return True
     else:
-        print(f"⚠️ خطا در بررسی ریپو: {check.text}")
+        print(f"❌ خطا در کلون: {result.stderr}")
+        return False
 
-ensure_github_repo()
+setup_local_repo()
+
+ensure_github_repo = lambda: None  # غیرفعال شد
 
 init_database()
 
@@ -394,7 +390,7 @@ async def progress_callback(current, total, status_msg, file_name, file_size):
     except:
         pass
 
-# ====================== آپلود به GitHub (Git Data API - مناسب برای فایل‌های بزرگ) ======================
+# ====================== آپلود به GitHub (Git Push - بدون محدودیت حجم) ======================
 async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg: Message, client, chat_id, user_id):
     try:
         password = secrets.token_urlsafe(64)
@@ -410,49 +406,20 @@ async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg:
 
         await status_msg.edit_text("☁️ در حال آپلود به GitHub...")
 
-        headers = {
-            "Authorization": f"token {GITHUB_TOKEN}",
-            "Accept": "application/vnd.github.v3+json"
-        }
+        # Copy to local repo
+        dest_file = LOCAL_REPO_PATH / zip_path.name
+        import shutil
+        shutil.copy(zip_path, dest_file)
 
-        # Get repo info
-        repo_info = requests.get(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}", headers=headers).json()
-        default_branch = repo_info.get("default_branch", "main")
+        # Git operations
+        os.chdir(LOCAL_REPO_PATH)
+        subprocess.run(["git", "checkout", "-b", branch_name], capture_output=True)
+        subprocess.run(["git", "add", zip_path.name], capture_output=True)
+        subprocess.run(["git", "commit", "-m", f"Upload {file_name}"], capture_output=True)
+        push_result = subprocess.run(["git", "push", "origin", branch_name], capture_output=True, text=True)
 
-        # Get base SHA
-        ref = requests.get(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/ref/heads/{default_branch}", headers=headers).json()
-        base_sha = ref["object"]["sha"]
-
-        # Create branch
-        requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs", json={"ref": f"refs/heads/{branch_name}", "sha": base_sha}, headers=headers)
-
-        # Read and encode file
-        with open(zip_path, "rb") as f:
-            content = f.read()
-        content_b64 = base64.b64encode(content).decode()
-
-        # Create blob
-        blob_resp = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/blobs", json={"content": content_b64, "encoding": "base64"}, headers=headers)
-        if blob_resp.status_code != 201:
-            raise Exception(f"Failed to create blob: {blob_resp.text}")
-        blob_sha = blob_resp.json()["sha"]
-
-        # Create tree
-        tree_data = {"base_tree": base_sha, "tree": [{"path": zip_path.name, "mode": "100644", "type": "blob", "sha": blob_sha}]}
-        tree_resp = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/trees", json=tree_data, headers=headers)
-        if tree_resp.status_code != 201:
-            raise Exception(f"Failed to create tree: {tree_resp.text}")
-        tree_sha = tree_resp.json()["sha"]
-
-        # Create commit
-        commit_data = {"message": f"Upload {file_name}", "tree": tree_sha, "parents": [base_sha]}
-        commit_resp = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/commits", json=commit_data, headers=headers)
-        if commit_resp.status_code != 201:
-            raise Exception(f"Failed to create commit: {commit_resp.text}")
-        commit_sha = commit_resp.json()["sha"]
-
-        # Update branch
-        requests.patch(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs/heads/{branch_name}", json={"sha": commit_sha}, headers=headers)
+        if push_result.returncode != 0:
+            raise Exception(f"Git push failed: {push_result.stderr}")
 
         download_link = f"https://codeload.github.com/{GITHUB_OWNER}/{GITHUB_REPO}/zip/refs/heads/{branch_name}"
 
@@ -471,6 +438,7 @@ async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg:
 
         if file_path.exists(): os.remove(file_path)
         if zip_path.exists(): os.remove(zip_path)
+        if dest_file.exists(): os.remove(dest_file)
 
         asyncio.create_task(delete_branch_after_delay(branch_name, minutes * 60, client, chat_id))
 
