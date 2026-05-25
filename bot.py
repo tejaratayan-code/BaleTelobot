@@ -103,7 +103,6 @@ def ensure_github_repo():
         "Accept": "application/vnd.github.v3+json"
     }
 
-    # Check if repo exists
     check = requests.get(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}", headers=headers)
     if check.status_code == 404:
         print(f"🔨 در حال ساخت ریپوی {GITHUB_REPO} ...")
@@ -113,7 +112,23 @@ def ensure_github_repo():
             "description": "Bale Telegram Bot - File Uploads"
         }, headers=headers)
         if create.status_code in [201, 200]:
-            print(f"✅ ریپوی {GITHUB_REPO} با موفقیت ساخته شد!")
+            print(f"✅ ریپوی {GITHUB_REPO} ساخته شد. در حال مقداردهی اولیه...")
+            time.sleep(2)
+            init_content = "# BaleTelobot Uploads\n\nThis repository is used by BaleTelobot for secure file uploads."
+            init_b64 = base64.b64encode(init_content.encode()).decode()
+
+            blob = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/blobs", json={"content": init_b64, "encoding": "base64"}, headers=headers)
+            blob_sha = blob.json()["sha"]
+
+            tree = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/trees", json={"tree": [{"path": "README.md", "mode": "100644", "type": "blob", "sha": blob_sha}]}, headers=headers)
+            tree_sha = tree.json()["sha"]
+
+            commit = requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/commits", json={"message": "Initial commit", "tree": tree_sha}, headers=headers)
+            commit_sha = commit.json()["sha"]
+
+            requests.post(f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/git/refs", json={"ref": "refs/heads/main", "sha": commit_sha}, headers=headers)
+
+            print(f"✅ ریپوی {GITHUB_REPO} آماده استفاده است!")
         else:
             print(f"❌ خطا در ساخت ریپو: {create.text}")
     elif check.status_code == 200:
@@ -363,7 +378,7 @@ async def download_handler(client: Client, message: Message):
                 await upload_to_github_codeload(destination, file_name, status, client, message.chat.id, tg_id)
 
     except Exception as e:
-        await status.edit_text(f"❌ خطا: {str(e)}")
+        await status_msg.edit_text(f"❌ خطا: {str(e)}")
 
 # ====================== پیصرفت دانلود ======================
 async def progress_callback(current, total, status_msg, file_name, file_size):
@@ -400,7 +415,8 @@ async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg:
         random_num = random.randint(100000, 999999)
         branch_name = f"user_{user_id}_{random_num}"
 
-        await status_msg.edit_text("🗜 در حال فشرده‌سازی...")
+        file_size_mb = file_path.stat().st_size / (1024 * 1024)
+        await status_msg.edit_text(f"🗜 در حال فشرده‌سازی فایل ({file_size_mb:.1f} MB)...\nلطفاً صبر کنید...")
 
         with py7zr.SevenZipFile(zip_path, mode='w', password=password) as z:
             z.write(file_path, arcname=file_path.name)
