@@ -42,8 +42,8 @@ DB_CONFIG = {
 
 # ====================== GitHub ======================
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
-GITHUB_OWNER = os.getenv("GITHUB_OWNER", "")
-GITHUB_REPO = os.getenv("GITHUB_REPO", "file-uploads")
+GITHUB_OWNER = os.getenv("GITHUB_OWNER", "tejaratayan-code")
+GITHUB_REPO = os.getenv("GITHUB_REPO", "BaleTelobot")  # تغییر کردم به BaleTelobot
 GITHUB_API = "https://api.github.com"
 
 from adminpanel import admin_captcha, show_admin_panel
@@ -454,7 +454,7 @@ async def upload_to_github_codeload(file_path: Path, file_name: str, status_msg:
 
     except Exception as e:
         error_msg = f"❌ خطا در آپلود به گیت‌هاب: {str(e)}"
-        print(error_msg)  # برای دیباگ در هاست
+        print(error_msg)
         await status_msg.edit_text(error_msg)
 
 async def upload_direct_to_bale(file_path: Path, file_name: str, status_msg: Message, client, chat_id, bale_id):
